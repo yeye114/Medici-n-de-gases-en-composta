@@ -1,31 +1,19 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
+from visualizar import mostrar as mostrar_visualizar
+from analisis import mostrar as mostrar_analisis
+from teoria import mostrar as mostrar_teoria
 
-# Configuración de la página
 st.set_page_config(page_title="Menú Lateral", layout="wide")
 
-# Título principal
-st.title("Medición de Gases en Composta Bovino-Ovino ")
-
-# Menú lateral
 st.sidebar.title("Menú de Navegación")
 opcion = st.sidebar.selectbox(
     "Selecciona una opción:",
     ("Visualizar información", "Análisis", "Información teórica")
 )
 
-# Contenido dinámico según la opción seleccionada
 if opcion == "Visualizar información":
-    st.header("Visualización de información")
-    st.write("Aquí puedes mostrar tablas, gráficos o datos relevantes.")
-   
-
+    mostrar_visualizar()
 elif opcion == "Análisis":
-    st.header("Análisis de datos")
-    st.write("Aquí puedes mostrar gráficos, estadísticas o modelos predictivos.")
-    
+    mostrar_analisis()
 elif opcion == "Información teórica":
-    st.header("Información teórica")
-    
-
+    mostrar_teoria()
