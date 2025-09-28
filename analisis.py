@@ -1,5 +1,5 @@
 import streamlit as st
- # from forest import ejecutar as ejecutar_forest
+from forest import ejecutar as ejecutar_forest
 # from bayes import ejecutar as ejecutar_bayes
 
 def mostrar():
@@ -44,8 +44,8 @@ def mostrar():
         if len(x_col) == 0:
             st.error("Debes seleccionar al menos una variable independiente.")
         else:
-            st.info(f"Aquí iría la ejecución de {algoritmo}, pero está comentada por ahora.")
-            #if algoritmo == "Random Forest":
-             #   ejecutar_forest(df, x_col, y_col)
-            #elif algoritmo == "Red de Bayes":
-               # ejecutar_bayes(df, x_col, y_col)
+            #st.info(f"Aquí iría la ejecución de {algoritmo}, pero está comentada por ahora.")
+            if algoritmo == "Random Forest":
+             ejecutar_forest(df, x_col, y_col)
+            elif algoritmo == "Red de Bayes":
+                ejecutar_bayes(df, x_col, y_col)
