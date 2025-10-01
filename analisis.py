@@ -1,6 +1,7 @@
 import streamlit as st
- # from forest import ejecutar as ejecutar_forest
-# from bayes import ejecutar as ejecutar_bayes
+from forest import ejecutar as ejecutar_forest
+from bayes import ejecutar as ejecutar_bayes
+from linear import ejecutar as ejecutar_linear
 
 def mostrar():
     st.title("Análisis de Datos con Algoritmos")
@@ -22,7 +23,10 @@ def mostrar():
 
     # Selección de algoritmo
     st.subheader("Selecciona el algoritmo")
-    algoritmo = st.selectbox("Algoritmo", ["Random Forest", "Red de Bayes"])
+    algoritmo = st.selectbox(
+        "Algoritmo",
+        ["Random Forest", "Red de Bayes", "Regresión Lineal"]
+    )
 
     # Detectar cambio de algoritmo y limpiar variables
     if st.session_state.algoritmo != algoritmo:
@@ -34,18 +38,32 @@ def mostrar():
     st.subheader("Selecciona las variables")
     columnas = df.columns.tolist()
     x_col = st.multiselect("Variables independientes (X)", columnas, default=st.session_state.x_col)
-    y_col = st.selectbox("Variable dependiente (Y)", columnas, index=columnas.index(st.session_state.y_col) if st.session_state.y_col in columnas else 0)
+    y_col = st.selectbox(
+        "Variable dependiente (Y)", 
+        columnas, 
+        index=columnas.index(st.session_state.y_col) if st.session_state.y_col in columnas else 0
+    )
 
     # Guardar en sesión
     st.session_state.x_col = x_col
     st.session_state.y_col = y_col
 
+    # Si selecciona regresión, mostrar sub-opciones
+    modelo_regresion = None
+    if algoritmo == "Regresión Lineal":
+        modelo_regresion = st.selectbox(
+            "Selecciona el tipo de regresión",
+            ["linear", "ridge", "lasso", "elastic"]
+        )
+
     if st.button("Ejecutar"):
         if len(x_col) == 0:
             st.error("Debes seleccionar al menos una variable independiente.")
         else:
-            st.info(f"Aquí iría la ejecución de {algoritmo}, pero está comentada por ahora.")
-            #if algoritmo == "Random Forest":
-             #   ejecutar_forest(df, x_col, y_col)
-            #elif algoritmo == "Red de Bayes":
-               # ejecutar_bayes(df, x_col, y_col)
+            st.info(f"Aquí está el resultado del {algoritmo}")
+            if algoritmo == "Random Forest":
+                ejecutar_forest(df, x_col, y_col)
+            elif algoritmo == "Red de Bayes":
+                ejecutar_bayes(df, x_col, y_col)
+            elif algoritmo == "Regresión Lineal":
+                ejecutar_linear(df, x_col, y_col, modelo_regresion)
