@@ -1,50 +1,66 @@
+import pandas as pd
 import streamlit as st
-from forest import ejecutar as ejecutar_forest
-from bayes import ejecutar as ejecutar_bayes
+import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
+from scipy.stats import gaussian_kde
+import numpy as np
 
-def mostrar():
-    st.title("Análisis de Datos con Algoritmos")
+def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, modelo_tipo: str = "linear"):
+    try:
+        # Separar variables predictoras y objetivo
+        X = df[x_col].values
+        y = df[y_col].values
 
-    # Verificar si hay un archivo cargado
-    if 'df' not in st.session_state:
-        st.warning("Primero debes subir un archivo en 'Visualizar información'.")
-        return
-
-    df = st.session_state.df
-
-    # Inicializar estado para algoritmo
-    if 'algoritmo' not in st.session_state:
-        st.session_state.algoritmo = None
-    if 'x_col' not in st.session_state:
-        st.session_state.x_col = []
-    if 'y_col' not in st.session_state:
-        st.session_state.y_col = None
-
-    # Selección de algoritmo
-    st.subheader("Selecciona el algoritmo")
-    algoritmo = st.selectbox("Algoritmo", ["Random Forest", "Red de Bayes"])
-
-    # Detectar cambio de algoritmo y limpiar variables
-    if st.session_state.algoritmo != algoritmo:
-        st.session_state.algoritmo = algoritmo
-        st.session_state.x_col = []
-        st.session_state.y_col = None
-
-    # Selección de variables
-    st.subheader("Selecciona las variables")
-    columnas = df.columns.tolist()
-    x_col = st.multiselect("Variables independientes (X)", columnas, default=st.session_state.x_col)
-    y_col = st.selectbox("Variable dependiente (Y)", columnas, index=columnas.index(st.session_state.y_col) if st.session_state.y_col in columnas else 0)
-
-    # Guardar en sesión
-    st.session_state.x_col = x_col
-    st.session_state.y_col = y_col
-
-    if st.button("Ejecutar"):
-        if len(x_col) == 0:
-            st.error("Debes seleccionar al menos una variable independiente.")
+        # Selección del modelo
+        if modelo_tipo == "linear":
+            modelo = LinearRegression()
+        elif modelo_tipo == "ridge":
+            modelo = Ridge(alpha=1.0)
+        elif modelo_tipo == "lasso":
+            modelo = Lasso(alpha=0.1)
+        elif modelo_tipo == "elastic":
+            modelo = ElasticNet(alpha=0.1, l1_ratio=0.5)
         else:
-            if algoritmo == "Random Forest":
-                ejecutar_forest(df, x_col, y_col)
-            elif algoritmo == "Red de Bayes":
-                ejecutar_bayes(df, x_col, y_col)
+            st.error("⚠️ Modelo no reconocido. Usa: 'linear', 'ridge', 'lasso' o 'elastic'.")
+            return
+
+        # Entrenar el modelo
+        modelo.fit(X, y)
+
+        # Resultados numéricos
+        st.subheader(f"Resultados de la Regresión ({modelo_tipo.capitalize()})")
+        st.write("Coeficientes (pendientes):", modelo.coef_)
+        st.write("Intercepto (ordenada al origen):", modelo.intercept_)
+
+        r2 = modelo.score(X, y)
+        st.write("R² (bondad de ajuste):", r2)
+
+        # Predicciones
+        y_pred = modelo.predict(X)
+        df_resultados = pd.DataFrame({"Real": y, "Predicción": y_pred})
+        st.write("Comparación entre valores reales y predichos:")
+        st.dataframe(df_resultados)
+
+        # Gráfico conjunto de distribución tipo campana
+        st.subheader("Distribución del metano: Real vs Predicho")
+        fig, ax = plt.subplots()
+
+        # KDE para valores reales
+        kde_real = gaussian_kde(y)
+        x_vals = np.linspace(min(y.min(), y_pred.min()), max(y.max(), y_pred.max()), 200)
+        ax.plot(x_vals, kde_real(x_vals), label="Real", color="blue", linewidth=2)
+
+        # KDE para valores predichos
+        kde_pred = gaussian_kde(y_pred)
+        ax.plot(x_vals, kde_pred(x_vals), label="Predicción", color="red", linestyle="--", linewidth=2)
+
+        # Configuración de la gráfica
+        ax.set_title("Curvas de densidad (campana) del metano")
+        ax.set_xlabel("Metano")
+        ax.set_ylabel("Densidad")
+        ax.legend()
+
+        st.pyplot(fig)
+
+    except Exception as e:
+        st.error(f"Ocurrió un error al ejecutar la regresión: {e}")
