@@ -1,3 +1,4 @@
+import pandas as pd
 import streamlit as st
 from forest import ejecutar as ejecutar_forest
 from bayes import ejecutar as ejecutar_bayes
