@@ -40,7 +40,7 @@ def _prep_datetime_features(X: pd.DataFrame) -> pd.DataFrame:
     - Intenta parsear columnas object si >60% son convertibles a datetime.
     - Quita tz y genera year, month, day, hour y epoch (segundos).
     """
-    # 1) Detectar ya tipadas
+    # 1) Detectar datetimes ya tipadas
     dt_cols = list(X.select_dtypes(include=["datetime"]).columns) + \
               list(X.select_dtypes(include=["datetimetz"]).columns)
 
@@ -52,7 +52,7 @@ def _prep_datetime_features(X: pd.DataFrame) -> pd.DataFrame:
             if c not in dt_cols:
                 dt_cols.append(c)
 
-    # 3) Expandir cada datetime
+    # 3) Expandir cada datetime en features numéricos
     for c in dt_cols:
         dt = X[c]
 
@@ -474,8 +474,39 @@ def _plot_roc_pr_curves(model, X_test: pd.DataFrame, y_test: pd.Series):
 #   Entrada principal
 # =======================
 
-def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
+def ejecutar(df: pd.DataFrame, x_col: list, y_col: str,
+             test_size: float = 0.2,
+             random_state: int = 42,
+             top_n_importance: int = 10):
+    """
+    Ejecuta Random Forest como regresión o clasificación, según la variable objetivo.
+    """
     st.subheader("Resultados - Random Forest")
+
+    # Explicación del modelo
+    with st.expander("Información sobre Random Forest", expanded=False):
+        st.markdown("""
+        ### ¿Qué es Random Forest?
+
+        Random Forest es un modelo basado en **muchos árboles de decisión** entrenados en subconjuntos
+        aleatorios de datos y variables.
+
+        **Ventajas:**
+        - Captura relaciones **no lineales** y complejas.
+        - Maneja bien variables numéricas y categóricas.
+        - Robusto al ruido y a outliers moderados.
+        - Proporciona **importancia de variables**.
+
+        **Desventajas:**
+        - Menos interpretable que un modelo lineal.
+        - Puede ser más lento con muchos árboles y muchas características.
+        - No extrapola bien fuera del rango de datos observados.
+
+        **Cuándo usarlo:**
+        - Cuando sospechas relaciones no lineales entre variables.
+        - Cuando quieres buen desempeño sin mucho ajuste fino.
+        - Cuando te interesa saber qué variables son más importantes.
+        """)
 
     if len(x_col) == 0:
         st.error("Debes seleccionar al menos una variable independiente (X).")
@@ -486,8 +517,8 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
 
     # Opciones de visualización
     with st.expander("Opciones de visualización", expanded=False):
-        top_n_importance = st.slider("Top-N importancia de características", 5, 30, 10, step=1)
-        test_size = st.slider("Tamaño del conjunto de prueba", 0.1, 0.4, 0.2, step=0.05)
+        test_size = st.slider("Tamaño del conjunto de prueba", 0.1, 0.4, test_size, step=0.05)
+        top_n_importance = st.slider("Top-N importancia de características", 5, 30, top_n_importance, step=1)
 
     # Preparar datos
     X, y_raw = _preparar_xy(df, x_col, y_col)
@@ -502,10 +533,10 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
         X, y = X.loc[mask], y.loc[mask]
 
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42
+            X, y, test_size=test_size, random_state=random_state
         )
 
-        model = RandomForestRegressor(n_estimators=300, random_state=42, n_jobs=-1)
+        model = RandomForestRegressor(n_estimators=300, random_state=random_state, n_jobs=-1)
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
 
@@ -541,14 +572,14 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
         mask = y.notna()
         X, y = X.loc[mask], y.loc[mask]
 
-        split = _safe_train_test_split(X, y, test_size=test_size, random_state=42)
+        split = _safe_train_test_split(X, y, test_size=test_size, random_state=random_state)
         if split is None:
             st.error("Clasificación no posible: la variable objetivo (Y) solo tiene una clase.")
             return
 
         X_train, X_test, y_train, y_test = split
 
-        model = RandomForestClassifier(n_estimators=300, random_state=42, n_jobs=-1)
+        model = RandomForestClassifier(n_estimators=300, random_state=random_state, n_jobs=-1)
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
 
