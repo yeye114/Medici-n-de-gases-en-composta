@@ -138,46 +138,120 @@ def _plot_feature_importance(model, X: pd.DataFrame, top_n: int = 10):
     st.plotly_chart(fig, use_container_width=True)
     st.caption("Importancia de características: mayor barra ⇒ mayor contribución al modelo.")
 
-def _plot_regression_charts(y_test: pd.Series, y_pred: np.ndarray):
-    # 1) Actual vs Predicho
-    df1 = pd.DataFrame({"y_real": y_test, "y_pred": y_pred})
-    # Sin trendline="ols" para no depender de statsmodels
-    fig1 = px.scatter(df1, x="y_real", y="y_pred")
+def _plot_regression_charts(model, X_test, y_test, y_pred):
+    import plotly.express as px
+    import plotly.graph_objects as go
 
-    # línea y = x para referencia perfecta
-    min_val = min(df1["y_real"].min(), df1["y_pred"].min())
-    max_val = max(df1["y_real"].max(), df1["y_pred"].max())
-    fig1.add_trace(
-        go.Scatter(
-            x=[min_val, max_val],
-            y=[min_val, max_val],
-            mode="lines",
-            name="y = x (predicción perfecta)",
-            line=dict(dash="dash")
-        )
+    df = pd.DataFrame({
+        "y_real": y_test,
+        "y_pred": y_pred
+    })
+
+    # ==========================
+    #   1) Actual vs Predicho
+    # ==========================
+
+    # Cálculo de bandas de error con desviación estándar del bosque
+    all_tree_preds = np.array([est.predict(X_test) for est in model.estimators_])
+    pred_std = all_tree_preds.std(axis=0)
+
+    min_val = min(df["y_real"].min(), df["y_pred"].min())
+    max_val = max(df["y_real"].max(), df["y_pred"].max())
+
+    fig1 = go.Figure()
+
+    # dispersión
+    fig1.add_trace(go.Scatter(
+        x=df["y_real"],
+        y=df["y_pred"],
+        mode="markers",
+        name="Predicciones",
+        marker=dict(size=7, opacity=0.7)
+    ))
+
+    # línea y = x
+    fig1.add_trace(go.Scatter(
+        x=[min_val, max_val],
+        y=[min_val, max_val],
+        mode="lines",
+        name="y = x (predicción perfecta)",
+        line=dict(color="green", dash="dash")
+    ))
+
+    # banda superior
+    fig1.add_trace(go.Scatter(
+        x=df["y_real"],
+        y=df["y_pred"] + pred_std,
+        mode="lines",
+        line=dict(width=0),
+        showlegend=False
+    ))
+
+    # banda inferior
+    fig1.add_trace(go.Scatter(
+        x=df["y_real"],
+        y=df["y_pred"] - pred_std,
+        fill="tonexty",
+        mode="lines",
+        name="Banda de error (±1σ)",
+        line=dict(width=0),
+        opacity=0.2
+    ))
+
+    fig1.update_layout(
+        title="Actual vs Predicho – Random Forest (Regresión)",
+        xaxis_title="Valor real",
+        yaxis_title="Valor predicho",
+        template="plotly_white"
     )
 
     st.plotly_chart(fig1, use_container_width=True)
-    st.caption(
-        "Dispersión Actual vs Predicho: los puntos cercanos a la línea y=x indican buenas predicciones."
-    )
 
-    # 2) Histograma de residuales
+    st.caption("""
+**Dispersión entre valores reales y predichos.**  
+La banda sombreada representa la variabilidad del modelo (±1 desviación estándar entre árboles).
+Una mayor cercanía de los puntos a la línea diagonal indica mejor desempeño.
+""")
+
+
+    # ==========================
+    #   2) Histograma de residuales
+    # ==========================
+
     resid = y_test - y_pred
-    fig2 = px.histogram(resid, nbins=20)
+    fig2 = px.histogram(resid, nbins=20, title="Distribución de Errores (Residuales)")
+    fig2.update_layout(
+        xaxis_title="Residual (y_real - y_pred)",
+        yaxis_title="Frecuencia",
+        template="plotly_white"
+    )
     st.plotly_chart(fig2, use_container_width=True)
-    st.caption(
-        "Histograma de residuales: idealmente centrado en 0 y relativamente simétrico (sin sesgos fuertes)."
-    )
 
-    # 3) Residual vs Predicho
+    st.caption("""
+**Distribución de los errores (residuales).**  
+Idealmente centrada en cero y simétrica: indica que el modelo no presenta sesgo sistemático.
+""")
+
+
+    # ==========================
+    #   3) Residuales vs Predicho
+    # ==========================
+
     df3 = pd.DataFrame({"residual": resid, "y_pred": y_pred})
-    fig3 = px.scatter(df3, x="y_pred", y="residual")
+    fig3 = px.scatter(df3, x="y_pred", y="residual",
+                      title="Residuales vs Valor Predicho")
     fig3.add_hline(y=0, line_dash="dash")
-    st.plotly_chart(fig3, use_container_width=True)
-    st.caption(
-        "Residuales vs Predicho: un patrón aleatorio alrededor de 0 sugiere que los errores son razonables."
+    fig3.update_layout(
+        xaxis_title="Valor predicho",
+        yaxis_title="Residual",
+        template="plotly_white"
     )
+    st.plotly_chart(fig3, use_container_width=True)
+
+    st.caption("""
+**Relación entre residuales y valores predichos.**  
+Un patrón aleatorio alrededor de 0 indica que el modelo no presenta problemas de heterocedasticidad.
+""")
 
 def _plot_confusion_matrix(y_test: pd.Series, y_pred: np.ndarray):
     labels = sorted(pd.unique(y_test))
@@ -302,7 +376,8 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
 
 
         st.markdown("### Gráficas")
-        _plot_regression_charts(y_test, y_pred)
+        _plot_regression_charts(model, X_test, y_test, y_pred)
+
 
         st.markdown("### Importancia de características")
         _plot_feature_importance(model, X, top_n=top_n_importance)
