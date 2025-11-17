@@ -1,5 +1,5 @@
 # forest.py
-from typing import Tuple, List
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -19,11 +19,15 @@ from sklearn.metrics import (
     average_precision_score,
 )
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import label_binarize
+
 import plotly.express as px
 import plotly.graph_objects as go
 
 
-# -------------------- utilidades --------------------
+# =======================
+#   Utilidades de datos
+# =======================
 
 def _es_numerica(serie: pd.Series) -> bool:
     return pd.api.types.is_numeric_dtype(serie)
@@ -36,9 +40,11 @@ def _prep_datetime_features(X: pd.DataFrame) -> pd.DataFrame:
     - Intenta parsear columnas object si >60% son convertibles a datetime.
     - Quita tz y genera year, month, day, hour y epoch (segundos).
     """
+    # 1) Detectar ya tipadas
     dt_cols = list(X.select_dtypes(include=["datetime"]).columns) + \
               list(X.select_dtypes(include=["datetimetz"]).columns)
 
+    # 2) Intentar parsear object a datetime
     for c in X.select_dtypes(include=["object"]).columns:
         parsed = pd.to_datetime(X[c], errors="coerce", infer_datetime_format=True)
         if parsed.notna().mean() > 0.6:
@@ -46,8 +52,11 @@ def _prep_datetime_features(X: pd.DataFrame) -> pd.DataFrame:
             if c not in dt_cols:
                 dt_cols.append(c)
 
+    # 3) Expandir cada datetime
     for c in dt_cols:
         dt = X[c]
+
+        # quitar tz si existe
         try:
             if getattr(dt.dt, "tz", None) is not None:
                 try:
@@ -61,6 +70,7 @@ def _prep_datetime_features(X: pd.DataFrame) -> pd.DataFrame:
         X[f"{c}_month"] = dt.dt.month
         X[f"{c}_day"] = dt.dt.day
         X[f"{c}_hour"] = dt.dt.hour
+
         try:
             epoch = dt.view("int64") // 10**9
         except Exception:
@@ -73,20 +83,26 @@ def _prep_datetime_features(X: pd.DataFrame) -> pd.DataFrame:
 
 
 def _preparar_xy(df: pd.DataFrame, x_col: list, y_col: str) -> Tuple[pd.DataFrame, pd.Series]:
-    """Selecciona columnas, convierte datetime, one-hot, fuerza numérico y fillna."""
+    """
+    Selecciona columnas, convierte datetime, aplica one-hot,
+    fuerza a numérico y rellena NaN con la mediana.
+    """
     data = df[x_col + [y_col]].dropna(subset=[y_col]).copy()
 
     X = data[x_col].copy()
     X = _prep_datetime_features(X)
 
+    # One-hot para categóricas
     cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
     if cat_cols:
         X = pd.get_dummies(X, columns=cat_cols, drop_first=True)
 
+    # Forzar todo a numérico
     for c in X.columns:
         if not pd.api.types.is_numeric_dtype(X[c]):
             X[c] = pd.to_numeric(X[c], errors="coerce")
 
+    # Relleno de NaN
     if X.isna().any().any():
         X = X.fillna(X.median(numeric_only=True))
 
@@ -95,11 +111,15 @@ def _preparar_xy(df: pd.DataFrame, x_col: list, y_col: str) -> Tuple[pd.DataFram
 
 
 def _es_regresion(y: pd.Series) -> bool:
+    """Se considera regresión si Y es numérica y tiene muchas clases (>20)."""
     return _es_numerica(y) and y.nunique() > 20
 
 
 def _asegurar_clasificacion(y: pd.Series) -> Tuple[pd.Series, str]:
-    """Si y es continua con muchas clases, discretiza en quantiles."""
+    """
+    Si Y es continua con muchas clases, la discretiza en quantiles para clasificación.
+    Devuelve Y como string y una nota explicativa.
+    """
     msg = ""
     if _es_numerica(y) and y.nunique() > 20:
         for q in (5, 4, 3):
@@ -109,6 +129,7 @@ def _asegurar_clasificacion(y: pd.Series) -> Tuple[pd.Series, str]:
                 return y_binned.astype(str), msg
             except Exception:
                 continue
+        # Fallback a bins uniformes
         y_binned = pd.cut(y, bins=3)
         msg = "Y continua → discretizada en 3 bins uniformes para clasificación."
         return y_binned.astype(str), msg
@@ -116,7 +137,10 @@ def _asegurar_clasificacion(y: pd.Series) -> Tuple[pd.Series, str]:
 
 
 def _safe_train_test_split(X, y, test_size=0.2, random_state=42):
-    """Estratifica solo si TODAS las clases tienen ≥2 muestras; si hay 1 clase, devuelve None."""
+    """
+    Usa estratificación solo si TODAS las clases tienen ≥2 muestras.
+    Si Y tiene solo una clase, devuelve None.
+    """
     if y.nunique() < 2:
         return None
     vc = y.value_counts()
@@ -126,207 +150,329 @@ def _safe_train_test_split(X, y, test_size=0.2, random_state=42):
     return train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=stratify_arg)
 
 
-# -------------------- ayudas de visualización --------------------
+# =======================
+#   Visualizaciones
+# =======================
 
 def _plot_feature_importance(model, X: pd.DataFrame, top_n: int = 10):
     importancias = getattr(model, "feature_importances_", None)
     if importancias is None:
         return
+
     imp_df = pd.DataFrame({"feature": X.columns, "importance": importancias})
     imp_df = imp_df.sort_values("importance", ascending=False).head(top_n)
-    fig = px.bar(imp_df, x="importance", y="feature", orientation="h")
+
+    fig = px.bar(
+        imp_df,
+        x="importance",
+        y="feature",
+        orientation="h",
+        title="Importancia de Características – Random Forest",
+    )
+    fig.update_layout(
+        xaxis_title="Importancia relativa",
+        yaxis_title="Características",
+        template="plotly_white",
+        yaxis=dict(autorange="reversed"),
+    )
     st.plotly_chart(fig, use_container_width=True)
-    st.caption("Importancia de características: mayor barra ⇒ mayor contribución al modelo.")
+
+    st.caption(
+        "Las barras más largas indican variables con mayor influencia en las predicciones del modelo."
+    )
+
 
 def _plot_regression_charts(model, X_test, y_test, y_pred):
-    import plotly.express as px
-    import plotly.graph_objects as go
+    """
+    Gráficas de regresión:
+    - Actual vs Predicho con banda de error
+    - Histograma de residuales
+    - Residuales vs Predicho
+    """
+    df = pd.DataFrame({"y_real": y_test, "y_pred": y_pred})
 
-    df = pd.DataFrame({
-        "y_real": y_test,
-        "y_pred": y_pred
-    })
-
-    # ==========================
-    #   1) Actual vs Predicho
-    # ==========================
-
-    # Cálculo de bandas de error con desviación estándar del bosque
+    # ---------- bandas de error con desviación estándar entre árboles ----------
     all_tree_preds = np.array([est.predict(X_test) for est in model.estimators_])
     pred_std = all_tree_preds.std(axis=0)
 
-    min_val = min(df["y_real"].min(), df["y_pred"].min())
-    max_val = max(df["y_real"].max(), df["y_pred"].max())
+    min_val = float(min(df["y_real"].min(), df["y_pred"].min()))
+    max_val = float(max(df["y_real"].max(), df["y_pred"].max()))
 
     fig1 = go.Figure()
 
     # dispersión
-    fig1.add_trace(go.Scatter(
-        x=df["y_real"],
-        y=df["y_pred"],
-        mode="markers",
-        name="Predicciones",
-        marker=dict(size=7, opacity=0.7)
-    ))
+    fig1.add_trace(
+        go.Scatter(
+            x=df["y_real"],
+            y=df["y_pred"],
+            mode="markers",
+            name="Predicciones",
+            marker=dict(size=7, opacity=0.7),
+        )
+    )
 
     # línea y = x
-    fig1.add_trace(go.Scatter(
-        x=[min_val, max_val],
-        y=[min_val, max_val],
-        mode="lines",
-        name="y = x (predicción perfecta)",
-        line=dict(color="green", dash="dash")
-    ))
+    fig1.add_trace(
+        go.Scatter(
+            x=[min_val, max_val],
+            y=[min_val, max_val],
+            mode="lines",
+            name="y = x (predicción perfecta)",
+            line=dict(color="green", dash="dash"),
+        )
+    )
 
     # banda superior
-    fig1.add_trace(go.Scatter(
-        x=df["y_real"],
-        y=df["y_pred"] + pred_std,
-        mode="lines",
-        line=dict(width=0),
-        showlegend=False
-    ))
+    fig1.add_trace(
+        go.Scatter(
+            x=df["y_real"],
+            y=df["y_pred"] + pred_std,
+            mode="lines",
+            line=dict(width=0),
+            showlegend=False,
+        )
+    )
 
-    # banda inferior
-    fig1.add_trace(go.Scatter(
-        x=df["y_real"],
-        y=df["y_pred"] - pred_std,
-        fill="tonexty",
-        mode="lines",
-        name="Banda de error (±1σ)",
-        line=dict(width=0),
-        opacity=0.2
-    ))
+    # banda inferior rellena
+    fig1.add_trace(
+        go.Scatter(
+            x=df["y_real"],
+            y=df["y_pred"] - pred_std,
+            fill="tonexty",
+            mode="lines",
+            name="Banda de error (±1σ)",
+            line=dict(width=0),
+            opacity=0.2,
+        )
+    )
 
     fig1.update_layout(
         title="Actual vs Predicho – Random Forest (Regresión)",
         xaxis_title="Valor real",
         yaxis_title="Valor predicho",
-        template="plotly_white"
+        template="plotly_white",
     )
 
     st.plotly_chart(fig1, use_container_width=True)
+    st.caption(
+        "**Dispersión entre valores reales y predichos.**  \n"
+        "La banda sombreada representa la variabilidad del modelo (±1 desviación estándar entre árboles). "
+        "Una mayor cercanía de los puntos a la línea diagonal indica mejor desempeño."
+    )
 
-    st.caption("""
-**Dispersión entre valores reales y predichos.**  
-La banda sombreada representa la variabilidad del modelo (±1 desviación estándar entre árboles).
-Una mayor cercanía de los puntos a la línea diagonal indica mejor desempeño.
-""")
-
-
-    # ==========================
-    #   2) Histograma de residuales
-    # ==========================
-
+    # ---------- Histograma de residuales ----------
     resid = y_test - y_pred
-    fig2 = px.histogram(resid, nbins=20, title="Distribución de Errores (Residuales)")
+    fig2 = px.histogram(
+        resid,
+        nbins=20,
+        title="Distribución de Errores (Residuales)",
+    )
     fig2.update_layout(
         xaxis_title="Residual (y_real - y_pred)",
         yaxis_title="Frecuencia",
-        template="plotly_white"
+        template="plotly_white",
     )
     st.plotly_chart(fig2, use_container_width=True)
+    st.caption(
+        "**Distribución de los errores (residuales).**  \n"
+        "Una forma aproximadamente simétrica y centrada en cero indica que el modelo no presenta sesgo sistemático."
+    )
 
-    st.caption("""
-**Distribución de los errores (residuales).**  
-Idealmente centrada en cero y simétrica: indica que el modelo no presenta sesgo sistemático.
-""")
-
-
-    # ==========================
-    #   3) Residuales vs Predicho
-    # ==========================
-
+    # ---------- Residuales vs Predicho ----------
     df3 = pd.DataFrame({"residual": resid, "y_pred": y_pred})
-    fig3 = px.scatter(df3, x="y_pred", y="residual",
-                      title="Residuales vs Valor Predicho")
+    fig3 = px.scatter(
+        df3,
+        x="y_pred",
+        y="residual",
+        title="Residuales vs Valor Predicho",
+    )
     fig3.add_hline(y=0, line_dash="dash")
     fig3.update_layout(
         xaxis_title="Valor predicho",
         yaxis_title="Residual",
-        template="plotly_white"
+        template="plotly_white",
     )
     st.plotly_chart(fig3, use_container_width=True)
+    st.caption(
+        "**Relación entre residuales y valores predichos.**  \n"
+        "Un patrón aleatorio alrededor de la línea 0 sugiere que la variabilidad del error es razonablemente constante."
+    )
 
-    st.caption("""
-**Relación entre residuales y valores predichos.**  
-Un patrón aleatorio alrededor de 0 indica que el modelo no presenta problemas de heterocedasticidad.
-""")
 
 def _plot_confusion_matrix(y_test: pd.Series, y_pred: np.ndarray):
     labels = sorted(pd.unique(y_test))
     cm = confusion_matrix(y_test, y_pred, labels=labels)
-    fig = px.imshow(cm, x=[str(l) for l in labels], y=[str(l) for l in labels],
-                    color_continuous_scale="Blues", text_auto=True,
-                    labels=dict(x="Predicción", y="Real", color="Frecuencia"))
+
+    fig = px.imshow(
+        cm,
+        x=[str(l) for l in labels],
+        y=[str(l) for l in labels],
+        color_continuous_scale="Blues",
+        text_auto=True,
+        labels=dict(x="Predicción", y="Valor real", color="Frecuencia"),
+        title="Matriz de Confusión – Random Forest (Clasificación)",
+    )
+    fig.update_layout(template="plotly_white")
     st.plotly_chart(fig, use_container_width=True)
-    st.caption("Matriz de confusión: diagonal alta indica buen desempeño (clases bien clasificadas).")
+
+    st.caption(
+        "**Matriz de confusión.**  \n"
+        "La diagonal principal muestra las predicciones correctas. "
+        "Valores altos fuera de la diagonal indican clases que el modelo confunde con otras."
+    )
+
 
 def _plot_roc_pr_curves(model, X_test: pd.DataFrame, y_test: pd.Series):
-    """ROC y PR. Binaria: curva directa. Multiclase: macro/micro promedios."""
-    # Probabilidades (si el modelo las soporta)
+    """
+    Curvas ROC y Precision–Recall.
+    - Binaria: una curva ROC y una curva PR.
+    - Multiclase: curvas por clase (one-vs-rest).
+    """
     if not hasattr(model, "predict_proba"):
         st.info("El modelo no expone predict_proba; se omiten curvas ROC/PR.")
         return
 
-    classes = pd.unique(y_test)
-    if len(classes) == 2:
-        # Binaria
-        proba = model.predict_proba(X_test)[:, 1]
-        fpr, tpr, _ = roc_curve(y_test.astype(str), (proba > 0.5).astype(int), pos_label="1")
-        # si las clases no son '0'/'1', volvemos a calcular usando y_test label-encoded
-        try:
-            from sklearn.preprocessing import label_binarize
-            y_bin = label_binarize(y_test, classes=classes)[:, 0]
-            fpr, tpr, _ = roc_curve(y_bin, proba)
-        except Exception:
-            pass
-        roc_auc = auc(fpr, tpr)
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=fpr, y=tpr, mode="lines", name=f"ROC AUC={roc_auc:.3f}"))
-        fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Azar", line=dict(dash="dash")))
-        fig.update_layout(xaxis_title="FPR", yaxis_title="TPR")
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption("Curva ROC: cuanto más arriba/izquierda, mejor (AUC alto).")
+    classes = np.unique(y_test)
+    proba = model.predict_proba(X_test)
 
-        prec, rec, _ = precision_recall_curve(y_bin, proba)
-        ap = average_precision_score(y_bin, proba)
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=rec, y=prec, mode="lines", name=f"AP={ap:.3f}"))
-        fig2.update_layout(xaxis_title="Recall", yaxis_title="Precision")
-        st.plotly_chart(fig2, use_container_width=True)
-        st.caption("Curva Precision–Recall: útil con clases desbalanceadas; AP más alto es mejor.")
-    else:
-        # Multiclase: micro/macro
-        from sklearn.preprocessing import label_binarize
-        classes_sorted = sorted(classes)
-        y_bin = label_binarize(y_test, classes=classes_sorted)
-        proba = model.predict_proba(X_test)
+    try:
+        if len(classes) == 2:
+            # ---------- Binaria ----------
+            y_bin = label_binarize(y_test, classes=classes).ravel()
+            proba_pos = proba[:, 1]
 
-        # ROC macro
-        roc_aucs = []
-        fig = go.Figure()
-        for i, c in enumerate(classes_sorted):
-            fpr, tpr, _ = roc_curve(y_bin[:, i], proba[:, i])
-            roc_aucs.append(auc(fpr, tpr))
-            fig.add_trace(go.Scatter(x=fpr, y=tpr, mode="lines", name=f"Clase {c} (AUC {roc_aucs[-1]:.2f})"))
-        fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Azar", line=dict(dash="dash")))
-        fig.update_layout(xaxis_title="FPR", yaxis_title="TPR", title="ROC por clase")
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption("Curvas ROC por clase (multiclase).")
+            # ROC
+            fpr, tpr, _ = roc_curve(y_bin, proba_pos)
+            roc_auc = auc(fpr, tpr)
 
-        # PR micro
-        fig2 = go.Figure()
-        for i, c in enumerate(classes_sorted):
-            prec, rec, _ = precision_recall_curve(y_bin[:, i], proba[:, i])
-            ap = average_precision_score(y_bin[:, i], proba[:, i])
-            fig2.add_trace(go.Scatter(x=rec, y=prec, mode="lines", name=f"Clase {c} (AP {ap:.2f})"))
-        fig2.update_layout(xaxis_title="Recall", yaxis_title="Precision", title="Precision–Recall por clase")
-        st.plotly_chart(fig2, use_container_width=True)
-        st.caption("Curvas Precision–Recall por clase (multiclase).")
+            fig_roc = go.Figure()
+            fig_roc.add_trace(
+                go.Scatter(
+                    x=fpr,
+                    y=tpr,
+                    mode="lines",
+                    name=f"ROC (AUC = {roc_auc:.3f})",
+                )
+            )
+            fig_roc.add_trace(
+                go.Scatter(
+                    x=[0, 1],
+                    y=[0, 1],
+                    mode="lines",
+                    name="Azar",
+                    line=dict(dash="dash"),
+                )
+            )
+            fig_roc.update_layout(
+                title="Curva ROC – Clasificación Binaria",
+                xaxis_title="Tasa de Falsos Positivos (FPR)",
+                yaxis_title="Tasa de Verdaderos Positivos (TPR)",
+                template="plotly_white",
+            )
+            st.plotly_chart(fig_roc, use_container_width=True)
+            st.caption(
+                "**Curva ROC.**  \n"
+                "Mide la capacidad del modelo para distinguir entre clases. "
+                "Un AUC cercano a 1 indica excelente separación, mientras que 0.5 equivale al azar."
+            )
+
+            # Precision–Recall
+            prec, rec, _ = precision_recall_curve(y_bin, proba_pos)
+            ap = average_precision_score(y_bin, proba_pos)
+
+            fig_pr = go.Figure()
+            fig_pr.add_trace(
+                go.Scatter(
+                    x=rec,
+                    y=prec,
+                    mode="lines",
+                    name=f"PR (AP = {ap:.3f})",
+                )
+            )
+            fig_pr.update_layout(
+                title="Curva Precision–Recall – Clasificación Binaria",
+                xaxis_title="Recall",
+                yaxis_title="Precision",
+                template="plotly_white",
+            )
+            st.plotly_chart(fig_pr, use_container_width=True)
+            st.caption(
+                "**Curva Precision–Recall.**  \n"
+                "Especialmente útil con clases desbalanceadas. "
+                "Valores altos de precisión y recall indican buen desempeño en la clase positiva."
+            )
+
+        else:
+            # ---------- Multiclase ----------
+            y_bin = label_binarize(y_test, classes=classes)
+
+            # ROC por clase
+            fig_roc = go.Figure()
+            for i, cls in enumerate(classes):
+                fpr, tpr, _ = roc_curve(y_bin[:, i], proba[:, i])
+                roc_auc = auc(fpr, tpr)
+                fig_roc.add_trace(
+                    go.Scatter(
+                        x=fpr,
+                        y=tpr,
+                        mode="lines",
+                        name=f"Clase {cls} (AUC={roc_auc:.2f})",
+                    )
+                )
+
+            fig_roc.add_trace(
+                go.Scatter(
+                    x=[0, 1],
+                    y=[0, 1],
+                    mode="lines",
+                    name="Azar",
+                    line=dict(dash="dash"),
+                )
+            )
+            fig_roc.update_layout(
+                title="Curvas ROC por Clase – Multiclase",
+                xaxis_title="FPR",
+                yaxis_title="TPR",
+                template="plotly_white",
+            )
+            st.plotly_chart(fig_roc, use_container_width=True)
+            st.caption(
+                "**Curvas ROC por clase.**  \n"
+                "Permiten evaluar qué tan bien se distingue cada clase frente al resto."
+            )
+
+            # Precision–Recall por clase
+            fig_pr = go.Figure()
+            for i, cls in enumerate(classes):
+                prec, rec, _ = precision_recall_curve(y_bin[:, i], proba[:, i])
+                ap = average_precision_score(y_bin[:, i], proba[:, i])
+                fig_pr.add_trace(
+                    go.Scatter(
+                        x=rec,
+                        y=prec,
+                        mode="lines",
+                        name=f"Clase {cls} (AP={ap:.2f})",
+                    )
+                )
+            fig_pr.update_layout(
+                title="Curvas Precision–Recall por Clase – Multiclase",
+                xaxis_title="Recall",
+                yaxis_title="Precision",
+                template="plotly_white",
+            )
+            st.plotly_chart(fig_pr, use_container_width=True)
+            st.caption(
+                "**Curvas Precision–Recall por clase.**  \n"
+                "Muestran el compromiso entre precisión y cobertura (recall) para cada clase."
+            )
+
+    except Exception as e:
+        st.info(f"No fue posible generar curvas ROC/PR (muestras muy pocas o clases problemáticas). Detalle: {e}")
 
 
-# -------------------- entrada principal --------------------
+# =======================
+#   Entrada principal
+# =======================
 
 def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
     st.subheader("Resultados - Random Forest")
@@ -338,17 +484,19 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
         st.error("Debes seleccionar la variable dependiente (Y).")
         return
 
-    # Config de visualización
+    # Opciones de visualización
     with st.expander("Opciones de visualización", expanded=False):
         top_n_importance = st.slider("Top-N importancia de características", 5, 30, 10, step=1)
-        test_size = st.slider("Tamaño de test", 0.1, 0.4, 0.2, step=0.05)
+        test_size = st.slider("Tamaño del conjunto de prueba", 0.1, 0.4, 0.2, step=0.05)
 
-    # Preparación de datos
+    # Preparar datos
     X, y_raw = _preparar_xy(df, x_col, y_col)
-    es_regresion = _es_regresion(y_raw)
+    es_reg = _es_regresion(y_raw)
 
-    # -------- Regresión --------
-    if es_regresion:
+    # ====================
+    #       REGRESIÓN
+    # ====================
+    if es_reg:
         y = pd.to_numeric(y_raw, errors="coerce")
         mask = y.notna()
         X, y = X.loc[mask], y.loc[mask]
@@ -356,11 +504,14 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=42
         )
+
         model = RandomForestRegressor(n_estimators=300, random_state=42, n_jobs=-1)
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
 
-        st.markdown("**Tarea detectada:** Regresión")
+        st.markdown("### Tipo de tarea: Regresión")
+
+        # Métricas
         st.markdown("### Métricas del modelo")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -374,15 +525,17 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
             rmse = np.sqrt(mse)
             st.metric("RMSE", f"{rmse:.4f}")
 
-
+        # Gráficas
         st.markdown("### Gráficas")
         _plot_regression_charts(model, X_test, y_test, y_pred)
 
-
+        # Importancia
         st.markdown("### Importancia de características")
         _plot_feature_importance(model, X, top_n=top_n_importance)
 
-    # -------- Clasificación --------
+    # ====================
+    #    CLASIFICACIÓN
+    # ====================
     else:
         y, nota = _asegurar_clasificacion(y_raw)
         mask = y.notna()
@@ -394,23 +547,29 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
             return
 
         X_train, X_test, y_train, y_test = split
+
         model = RandomForestClassifier(n_estimators=300, random_state=42, n_jobs=-1)
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
 
-        st.markdown("**Tarea detectada:** Clasificación")
+        st.markdown("### Tipo de tarea: Clasificación")
+
+        # Métrica principal
         acc = accuracy_score(y_test, y_pred)
         st.metric("Accuracy", f"{acc:.4f}")
         if nota:
             st.info(nota)
 
+        # Gráficas
         st.markdown("### Gráficas")
         _plot_confusion_matrix(y_test, y_pred)
         _plot_roc_pr_curves(model, X_test, y_test)
 
+        # Reporte de clasificación
         st.markdown("### Reporte de clasificación")
         rep = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
         st.dataframe(pd.DataFrame(rep).transpose(), use_container_width=True)
 
+        # Importancia
         st.markdown("### Importancia de características")
         _plot_feature_importance(model, X, top_n=top_n_importance)
