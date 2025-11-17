@@ -287,12 +287,19 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str):
         y_pred = model.predict(X_test)
 
         st.markdown("**Tarea detectada:** Regresión")
-        col1, col2, col3 = st.columns(3)
-        with col1: st.metric("R²", f"{r2_score(y_test, y_pred):.4f}")
-        with col2: st.metric("MAE", f"{mean_absolute_error(y_test, y_pred):.4f}")
-        mse = mean_squared_error(y_test, y_pred)
-        rmse = np.sqrt(mse)
-        with col3: st.metric("RMSE", f"{rmse:.4f}")
+        st.markdown("### Métricas del modelo")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("R² (Score)", f"{r2_score(y_test, y_pred):.4f}")
+        with col2:
+            st.metric("MAE", f"{mean_absolute_error(y_test, y_pred):.4f}")
+        with col3:
+            mse = mean_squared_error(y_test, y_pred)
+            st.metric("MSE", f"{mse:.4f}")
+        with col4:
+            rmse = np.sqrt(mse)
+            st.metric("RMSE", f"{rmse:.4f}")
+
 
         st.markdown("### Gráficas")
         _plot_regression_charts(y_test, y_pred)
