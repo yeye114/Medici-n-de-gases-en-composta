@@ -116,17 +116,21 @@ def calcular_metricas(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     mse = mean_squared_error(y_true, y_pred)
     ss_res = np.sum((y_true - y_pred) ** 2)
     ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    r2 = r2_score(y_true, y_pred)
+    
+    # Asegurar que R² esté entre 0 y 1
+    r2 = max(0.0, min(1.0, r2))
     
     return {
         'MSE': mse,
         'RMSE': np.sqrt(mse),
         'MAE': mean_absolute_error(y_true, y_pred),
-        'R2': r2_score(y_true, y_pred),
+        'R2': r2,
         'MAPE': np.mean(np.abs((y_true - y_pred) / (np.abs(y_true) + 1e-10))) * 100,
         'Max_Error': np.max(np.abs(y_true - y_pred)),
         'Min_Error': np.min(np.abs(y_true - y_pred)),
         'Std_Error': np.std(y_true - y_pred),
-        'Adjusted_R2': 1 - (ss_res / ss_tot)
+        'Adjusted_R2': max(0.0, min(1.0, 1 - (ss_res / ss_tot)))
     }
 
 
@@ -144,7 +148,7 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.2,
         try:
             test_size = float(test_size)
         except (ValueError, TypeError):
-            test_size = 0.7
+            test_size = 0.7  
             
         try:
             outlier_threshold = float(outlier_threshold)
@@ -472,7 +476,39 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.2,
             - Patrones sistemáticos (por ejemplo, todos los puntos debajo o encima de la línea)
             
             ---
+            **La línea verde (y = x):**
             
+            - **Ecuación:** y = x (pendiente = 1, intercepto = 0)
+            - **Significado:** Si el modelo predice exactamente el valor real, el punto caerá sobre esta línea
+            - **Ejemplo:** Si el valor real es 100, y el modelo predice 100, el punto está en (100, 100) sobre la línea
+            - **Interpretación:** Cuanto más cerca estén los puntos de esta línea, mejores son las predicciones
+            
+            ---
+            
+            **¿Por qué R² siempre está entre 0 y 1?**
+            
+            En esta implementación, R² está limitado al rango [0, 1]:
+            
+            - **R² = 1.0:** Predicción perfecta (todos los puntos en la línea verde)
+            - **R² = 0.8-0.99:** Excelente modelo
+            - **R² = 0.5-0.8:** Buen modelo
+            - **R² = 0.0-0.5:** Modelo débil
+            - **R² = 0.0:** El modelo no es mejor que predecir la media
+            
+            **Fórmula:** R² = 1 - (SS_residual / SS_total)
+            
+            Donde:
+            - SS_residual = suma de errores cuadráticos del modelo
+            - SS_total = varianza total de los datos
+            
+            **Si obtienes R² = 0.0:**
+            - El modelo predice igual que la media
+            - Considera cambiar el modelo o revisar las variables
+            - Puede indicar que no hay relación lineal entre X e y
+
+            ---
+           
+
             **Patrones a identificar:**
             
             1. **Subestimación sistemática:** Puntos principalmente debajo de la línea → el modelo predice valores menores
@@ -519,15 +555,112 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.2,
             line=dict(color='green', dash='dash', width=2.5)
         ))
         
-        fig1.update_layout(annotations=[dict(
-            x=0.02, y=0.98, xref='paper', yref='paper',
-            text=f'R² = {metrics_test["R2"]:.4f}<br>Error Promedio = {error_promedio:.4f}',
-            showarrow=False, bgcolor='rgba(142, 174, 191, 0.8)',
-            borderwidth=1, borderpad=15
-        )])
+         # Formatear R² mostrando siempre el porcentaje
+        r2_value = metrics_test["R2"]
+        r2_percent = r2_value * 100
+        
+        fig1.update_layout(annotations=[
+            dict(
+                x=0.02, y=0.98, xref='paper', yref='paper',
+                text=f'R² = {r2_percent:.2f}%<br>Error Promedio = {error_promedio:.4f}',
+                showarrow=False, bgcolor='rgba(142, 174, 191, 0.8)',
+                borderwidth=1, borderpad=15
+            ),
+        ])
         
         st.plotly_chart(fig1, use_container_width=True)
         
+        # ============================================
+        # ECUACIONES MATEMÁTICAS (DENTRO DE EXPANDER)
+        # ============================================
+        with st.expander("Ecuaciones Matemáticas Utilizadas", expanded=False):
+            # Crear dos columnas para las ecuaciones
+            col_ecuacion1, col_ecuacion2 = st.columns(2)
+            
+            # ========== COLUMNA 1: ECUACIÓN DEL MODELO ==========
+            with col_ecuacion1:
+                st.markdown("#### Ecuación del Modelo Entrenado")
+                
+                # Obtener coeficientes e intercepto
+                coeficientes = model.coef_
+                intercepto = model.intercept_
+                
+                # Construir ecuación en formato LaTeX
+                if len(x_col) == 1:
+                    latex_eq = f"\\hat{{y}} = {intercepto:.4f} + {coeficientes[0]:.4f} \\cdot x"
+                else:
+                    latex_eq = f"\\hat{{y}} = {intercepto:.4f}"
+                    for i, coef in enumerate(coeficientes, 1):
+                        signo = "+" if coef >= 0 else ""
+                        latex_eq += f" {signo} {coef:.4f} \\cdot x_{i}"
+                
+                # Mostrar ecuación
+                st.latex(latex_eq)
+                
+                st.markdown("""
+                **Descripción:**
+                - Esta es la ecuación que el modelo aprendió de los datos
+                - Representa la relación encontrada entre variables predictoras y objetivo
+                - Los coeficientes indican el peso/importancia de cada variable
+                """)
+                
+                # Detalles de coeficientes en expander interno
+                with st.expander("Ver coeficientes detallados"):
+                    coef_df = pd.DataFrame({
+                        'Variable': ['Intercepto (β₀)'] + [f'x_{i+1} ({var})' for i, var in enumerate(x_col)],
+                        'Coeficiente': [intercepto] + list(coeficientes),
+                        'Magnitud': [abs(intercepto)] + [abs(c) for c in coeficientes],
+                        'Efecto': ['Constante'] + ['Positivo ↑' if c > 0 else 'Negativo ↓' for c in coeficientes]
+                    })
+                    
+                    # Ordenar por magnitud
+                    coef_df_sorted = coef_df.iloc[1:].sort_values('Magnitud', ascending=False)
+                    coef_df_final = pd.concat([coef_df.iloc[[0]], coef_df_sorted])
+                    
+                    st.dataframe(coef_df_final.style.format({
+                        'Coeficiente': '{:.6f}',
+                        'Magnitud': '{:.6f}'
+                    }).background_gradient(subset=['Magnitud'], cmap='YlOrRd'), 
+                    use_container_width=True)
+                    
+                    # Variable más influyente
+                    if len(coeficientes) > 0:
+                        idx_max = np.argmax([abs(c) for c in coeficientes])
+                        var_max = x_col[idx_max]
+                        coef_max = coeficientes[idx_max]
+                        st.success(f"**Variable más influyente:** {var_max} (coef: {coef_max:.6f})")
+            
+            # ========== COLUMNA 2: LÍNEA DE REFERENCIA y=x ==========
+            with col_ecuacion2:
+                st.markdown("#### Línea de Predicción Perfecta")
+                
+                # Ecuación de la línea perfecta
+                st.latex(r"y = x")
+                
+                st.markdown("""
+                **Descripción:**
+                - Esta NO es la ecuación del modelo, es una línea de referencia
+                - Representa el escenario ideal donde el modelo predice perfectamente
+                - Significado: Valor Predicho = Valor Real
+                
+                **Interpretación:**
+                - **Sobre la línea:** Predicción perfecta (error = 0)
+                - **Cerca de la línea:** Buenas predicciones
+                - **Lejos de la línea:** Predicciones con errores grandes
+                
+                **Propiedades matemáticas:**
+                """)
+                
+                # Tabla de propiedades
+                props_df = pd.DataFrame({
+                    'Propiedad': ['Pendiente (m)', 'Intercepto (b)', 'Ángulo', 'Dominio', 'Rango'],
+                    'Valor': ['1', '0', '45°', '(-∞, +∞)', '(-∞, +∞)']
+                })
+                
+                st.dataframe(props_df, use_container_width=True, hide_index=True)
+                
+                st.info("**Nota importante:** Cuanto más cerca estén los puntos del gráfico de esta línea verde, mejor es el modelo.")
+
         # ============================================
         # GRÁFICO 2: RESIDUOS VS PREDICHOS
         # ============================================
@@ -838,9 +971,9 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.2,
             
             - **Barras de colores:** Cada par de barras representa una métrica
             - **Colores por métrica:**
-              - R² (azul/naranja): Proporción de varianza explicada
-              - RMSE (verde/rojo): Error cuadrático medio
-              - MAE (morado/marrón): Error absoluto medio
+              - R² (azul): Proporción de varianza explicada
+              - RMSE (verde): Error cuadrático medio
+              - MAE (morado): Error absoluto medio
             - **Números en las barras:** Valor exacto de cada métrica
             - **Etiqueta superior:** Diagnóstico de overfitting con código de color
             
@@ -856,19 +989,19 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.2,
             
             **Análisis por métrica:**
             
-            **1. R² (Azul/Naranja) - MAYOR ES MEJOR:**
+            **1. R² (Azul) - MAYOR ES MEJOR:**
             - **Train > Test (pequeña diferencia):** Normal y aceptable
             - **Train >> Test (gran diferencia):** Overfitting - modelo memoriza
             - **Ambos altos y similares:** Excelente generalización
             - **Ambos bajos y similares:** Underfitting - modelo muy simple
             
-            **2. RMSE (Verde/Rojo) - MENOR ES MEJOR:**
+            **2. RMSE (Verde) - MENOR ES MEJOR:**
             - **Test > Train (pequeña diferencia):** Normal
             - **Test >> Train (gran diferencia):** Overfitting
             - **Ambos bajos:** Predicciones precisas
             - **Ambos altos:** Modelo no captura la relación
             
-            **3. MAE (Morado/Marrón) - MENOR ES MEJOR:**
+            **3. MAE (Morado) - MENOR ES MEJOR:**
             - Similar interpretación que RMSE
             - Menos sensible a outliers que RMSE
             - Representa error promedio en unidades originales
@@ -945,9 +1078,9 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.2,
         
         fig4 = go.Figure()
         colores_metrics = {
-            'R²': ('#1f77b4', '#ff7f0e'),
-            'RMSE': ('#2ca02c', '#d62728'),
-            'MAE': ('#9467bd', '#8c564b')
+            'R²': ('#1f77b4', '#1f77b4'),
+            'RMSE': ('#2ca02c', '#2ca02c'),
+            'MAE': ('#9467bd', '#9467bd')
         }
         
         for idx, metric in enumerate(['R²', 'RMSE', 'MAE']):
@@ -975,26 +1108,51 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.2,
             hovermode='x unified'
         )
         
-        # Diagnóstico de overfitting
+        # Diagnóstico mejorado que considera tanto R² como overfitting
         diagnostico_texto = f"ΔR² = {diff_r2:.4f}"
-        if diff_r2 > 0.15:
-            diagnostico_texto += " - OVERFITTING"
+        
+        # Primero verificar la calidad del modelo (R² de test)
+        if metrics_test['R2'] < 0.10:
+            # R² muy bajo = modelo muy pobre
+            diagnostico_texto += " - MODELO MUY POBRE (R² < 10%)"
+            color_diag = "darkred"
+            overfitting_status = "No (modelo inútil)"
+        elif metrics_test['R2'] < 0.30:
+            # R² bajo = modelo pobre
+            diagnostico_texto += " - MODELO POBRE (R² < 30%)"
             color_diag = "red"
-            overfitting_status = "Sí"
+            overfitting_status = "No (modelo débil)"
+        elif diff_r2 > 0.15:
+            # Overfitting severo
+            diagnostico_texto += " - OVERFITTING SEVERO"
+            color_diag = "red"
+            overfitting_status = "Sí (severo)"
         elif diff_r2 > 0.10:
+            # Overfitting leve
             diagnostico_texto += " - Overfitting leve"
             color_diag = "orange"
             overfitting_status = "Leve"
+        elif metrics_test['R2'] < 0.50:
+            # Modelo aceptable pero mejorable
+            diagnostico_texto += " - Modelo aceptable (R² < 50%)"
+            color_diag = "orange"
+            overfitting_status = "No (mejorable)"
+        elif metrics_test['R2'] < 0.70:
+            # Buen modelo
+            diagnostico_texto += " - Buen modelo"
+            color_diag = "yellowgreen"
+            overfitting_status = "No"
         else:
-            diagnostico_texto += " - Buena generalización"
+            # Excelente modelo
+            diagnostico_texto += " - Excelente modelo"
             color_diag = "green"
             overfitting_status = "No"
-        
+
         fig4.add_annotation(
             x=0.5, y=0.95, xref='paper', yref='paper',
             text=diagnostico_texto, showarrow=False,
             bgcolor=color_diag, font=dict(color='white', size=14),
-            opacity=0.8
+            opacity=0.8, borderpad=8
         )
         
         st.plotly_chart(fig4, use_container_width=True)
@@ -1009,7 +1167,7 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.2,
         error_relativo = (metrics_test['RMSE'] / y_range * 100) if y_range > 0 else 0
         
         # Estado de convergencia
-        convergencia = "Exitosa" if metrics_test['R2'] > -1 else "Fallida"
+        convergencia = "Exitosa" if metrics_test['R2'] > 0 else "Fallida"
         
         # Crear dos columnas
         col_resumen1, col_resumen2 = st.columns(2)
