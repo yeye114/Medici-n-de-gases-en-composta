@@ -116,17 +116,21 @@ def calcular_metricas(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     mse = mean_squared_error(y_true, y_pred)
     ss_res = np.sum((y_true - y_pred) ** 2)
     ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    r2 = r2_score(y_true, y_pred)
+    
+    # Asegurar que R² esté entre 0 y 1
+    r2 = max(0.0, min(1.0, r2))
     
     return {
         'MSE': mse,
         'RMSE': np.sqrt(mse),
         'MAE': mean_absolute_error(y_true, y_pred),
-        'R2': r2_score(y_true, y_pred),
+        'R2': r2,  # <-- IMPORTANTE: usa la variable r2 limitada
         'MAPE': np.mean(np.abs((y_true - y_pred) / (np.abs(y_true) + 1e-10))) * 100,
         'Max_Error': np.max(np.abs(y_true - y_pred)),
         'Min_Error': np.min(np.abs(y_true - y_pred)),
         'Std_Error': np.std(y_true - y_pred),
-        'Adjusted_R2': 1 - (ss_res / ss_tot)
+        'Adjusted_R2': max(0.0, min(1.0, 1 - (ss_res / ss_tot)))
     }
 
 
@@ -403,6 +407,38 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
             
             ---
             
+             **La línea verde (y = x):**
+            
+            - **Ecuación:** y = x (pendiente = 1, intercepto = 0)
+            - **Significado:** Si el modelo predice exactamente el valor real, el punto caerá sobre esta línea
+            - **Ejemplo:** Si el valor real es 100, y el modelo predice 100, el punto está en (100, 100) sobre la línea
+            - **Interpretación:** Cuanto más cerca estén los puntos de esta línea, mejores son las predicciones
+            
+            ---
+            
+            **¿Por qué R² siempre está entre 0 y 1?**
+            
+            En esta implementación, R² está limitado al rango [0, 1]:
+            
+            - **R² = 1.0:** Predicción perfecta (todos los puntos en la línea verde)
+            - **R² = 0.8-0.99:** Excelente modelo
+            - **R² = 0.5-0.8:** Buen modelo
+            - **R² = 0.0-0.5:** Modelo débil
+            - **R² = 0.0:** El modelo no es mejor que predecir la media
+            
+            **Fórmula:** R² = 1 - (SS_residual / SS_total)
+            
+            Donde:
+            - SS_residual = suma de errores cuadráticos del modelo
+            - SS_total = varianza total de los datos
+            
+            **Si obtienes R² = 0.0:**
+            - El modelo predice igual que la media
+            - Considera cambiar el modelo o revisar las variables
+            - Puede indicar que no hay relación lineal entre X e y
+            
+            ---
+
             #### Interpretación de Resultados Actuales
             
             **Rendimiento General:**
@@ -504,12 +540,23 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
             - **Error = Valor Real - Valor Predicho**
             - Error positivo → modelo subestimó
             - Error negativo → modelo sobreestimó
+        
+            **Modelo ideal:**
+            - Todos los puntos estarían exactamente sobre la línea verde
+            - Esto significaría predicciones perfectas (Real = Predicho)
             
-            - **R² (0 a 1)**: Proporción de varianza explicada
-            - 0.9-1.0: Excelente
-            - 0.7-0.9: Bueno
-            - 0.5-0.7: Moderado
-            - < 0.5: Pobre (considera otro modelo)
+            **Buen modelo:**
+            - Los puntos se concentran cerca de la línea verde
+            - Poca dispersión alrededor de la línea
+            - Colores claros (errores pequeños)
+            
+            **Modelo con problemas:**
+            - Puntos muy alejados de la línea verde
+            - Gran dispersión
+            - Muchos puntos de color rojo intenso
+            - Patrones sistemáticos (por ejemplo, todos los puntos debajo o encima de la línea)
+            
+            ---
             
             - **Error Absoluto Promedio**: Magnitud típica de error
             - Compáralo con el rango de tus datos para contexto
@@ -534,12 +581,19 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
             line=dict(color='green', dash='dash', width=2)
         ))
         
-        fig1.update_layout(annotations=[dict(
-            x=0.02, y=0.98, xref='paper', yref='paper',
-            text=f'R² = {metrics_test["R2"]:.4f}<br>Error Promedio = {error_promedio:.4f}',
-            showarrow=False, bgcolor='rgba(142, 174, 191,0.8)',
-            borderwidth=1, borderpad=15
-        )])
+        # Formatear R² mostrando siempre el porcentaje
+        r2_value = metrics_test["R2"]
+        r2_percent = r2_value * 100
+        
+        fig1.update_layout(annotations=[
+            dict(
+                x=0.02, y=0.98, xref='paper', yref='paper',
+                text=f'R² = {r2_percent:.2f}%<br>Error Promedio = {error_promedio:.4f}',
+                showarrow=False, bgcolor='rgba(142, 174, 191, 0.8)',
+                borderwidth=1, borderpad=15
+            )
+        ])
+
         
         st.plotly_chart(fig1, use_container_width=True)
         
@@ -1277,7 +1331,7 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
                 
                 **1. R² (Coeficiente de Determinación):**
                 - **Barra azul (Entrenamiento)**: {metrics_train['R2']:.4f}
-                - **Barra naranja (Prueba)**: {metrics_test['R2']:.4f}
+                - **Barra azul (Prueba)**: {metrics_test['R2']:.4f}
                 - **Diferencia**: {diff_r2:.4f}
                 - **Qué mide**: Proporción de varianza explicada por el modelo
                 - **Escala**: -∞ a 1.0 (1.0 = perfecto)
@@ -1286,7 +1340,7 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
                 
                 **2. RMSE (Root Mean Squared Error):**
                 - **Barra verde (Entrenamiento)**: {metrics_train['RMSE']:.4f}
-                - **Barra roja (Prueba)**: {metrics_test['RMSE']:.4f}
+                - **Barra verde (Prueba)**: {metrics_test['RMSE']:.4f}
                 - **Diferencia**: {diff_rmse:+.4f} ({diff_rmse/metrics_train['RMSE']*100:+.1f}%)
                 - **Qué mide**: Error promedio con más peso a errores grandes
                 - **Unidades**: Mismas que '{y_col}'
@@ -1295,7 +1349,7 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
                 
                 **3. MAE (Mean Absolute Error):**
                 - **Barra morada (Entrenamiento)**: {metrics_train['MAE']:.4f}
-                - **Barra marrón (Prueba)**: {metrics_test['MAE']:.4f}
+                - **Barra morada (Prueba)**: {metrics_test['MAE']:.4f}
                 - **Diferencia**: {diff_mae:+.4f} ({diff_mae/metrics_train['MAE']*100:+.1f}%)
                 - **Qué mide**: Error promedio absoluto sin ponderación
                 - **Unidades**: Mismas que '{y_col}'
@@ -1314,7 +1368,7 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
                 
                 **Código de Colores:**
                 - **Colores fríos (azul, verde, morado)**: Entrenamiento
-                - **Colores cálidos (naranja, rojo, marrón)**: Prueba
+                - **Colores fríos (azul, verde, morado)**: Prueba
                 - Facilita identificar visualmente qué barra pertenece a qué conjunto
                 
                 **Anotación Superior (Diagnóstico):**
@@ -1587,9 +1641,9 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
         
         fig4 = go.Figure()
         colores_metrics = {
-            'R²': ('#1f77b4', '#ff7f0e'),
-            'RMSE': ('#2ca02c', '#d62728'),
-            'MAE': ('#9467bd', '#8c564b')
+            'R²': ('#1f77b4', '#1f77b4'),
+            'RMSE': ('#2ca02c', '#2ca02c'),
+            'MAE': ('#9467bd', '#9467bd')
         }
         
         for idx, metric in enumerate(['R²', 'RMSE', 'MAE']):
@@ -1618,17 +1672,45 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
             legend=dict(orientation="v", yanchor="top", y=1, xanchor="right", x=1)
         )
         
-        # Diagnóstico de overfitting
+        # Diagnóstico mejorado que considera tanto R² como overfitting
         diagnostico_texto = f"ΔR² = {diff_r2:.4f}"
-        if diff_r2 > 0.15:
-            diagnostico_texto += " - OVERFITTING"
+        
+        # Primero verificar la calidad del modelo (R² de test)
+        if metrics_test['R2'] < 0.10:
+            # R² muy bajo = modelo muy pobre
+            diagnostico_texto += " - MODELO MUY POBRE (R² < 10%)"
+            color_diag = "darkred"
+            overfitting_status = "No (modelo inútil)"
+        elif metrics_test['R2'] < 0.30:
+            # R² bajo = modelo pobre
+            diagnostico_texto += " - MODELO POBRE (R² < 30%)"
             color_diag = "red"
+            overfitting_status = "No (modelo débil)"
+        elif diff_r2 > 0.15:
+            # Overfitting severo
+            diagnostico_texto += " - OVERFITTING SEVERO"
+            color_diag = "red"
+            overfitting_status = "Sí (severo)"
         elif diff_r2 > 0.10:
+            # Overfitting leve
             diagnostico_texto += " - Overfitting leve"
             color_diag = "orange"
+            overfitting_status = "Leve"
+        elif metrics_test['R2'] < 0.50:
+            # Modelo aceptable pero mejorable
+            diagnostico_texto += " - Modelo aceptable (R² < 50%)"
+            color_diag = "orange"
+            overfitting_status = "No (mejorable)"
+        elif metrics_test['R2'] < 0.70:
+            # Buen modelo
+            diagnostico_texto += " - Buen modelo"
+            color_diag = "yellowgreen"
+            overfitting_status = "No"
         else:
-            diagnostico_texto += " - Buena generalización"
+            # Excelente modelo
+            diagnostico_texto += " - Excelente modelo"
             color_diag = "green"
+            overfitting_status = "No"
         
         fig4.add_annotation(
             x=0.5, y=0.95, xref='paper', yref='paper',
@@ -1670,12 +1752,12 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.7,
             """)
             
             st.markdown("**Diagnóstico:**")
-            overfitting_status = 'Sí' if diff_r2 > 0.15 else 'No'
             rmse_relativo = (metrics_test['RMSE'] / (y_max_original - y_min_original)) * 100
+            convergencia = "Exitosa" if metrics_test['R2'] > 0 else "Fallida"
             st.markdown(f"""
             - Overfitting: {overfitting_status}
             - Error relativo: {rmse_relativo:.2f}% del rango
-            - Convergencia: {'Exitosa' if n_iteraciones < 300 else 'Límite alcanzado'}
+            - Convergencia: {convergencia}
             """)
         
         st.success("Análisis completado exitosamente")
