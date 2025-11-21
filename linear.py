@@ -604,31 +604,33 @@ def ejecutar(df: pd.DataFrame, x_col: list, y_col: str, test_size: float = 0.2,
                 - Los coeficientes indican el peso/importancia de cada variable
                 """)
                 
-                # Detalles de coeficientes en expander interno
-                with st.expander("Ver coeficientes detallados"):
-                    coef_df = pd.DataFrame({
-                        'Variable': ['Intercepto (β₀)'] + [f'x_{i+1} ({var})' for i, var in enumerate(x_col)],
-                        'Coeficiente': [intercepto] + list(coeficientes),
-                        'Magnitud': [abs(intercepto)] + [abs(c) for c in coeficientes],
-                        'Efecto': ['Constante'] + ['Positivo ↑' if c > 0 else 'Negativo ↓' for c in coeficientes]
-                    })
-                    
-                    # Ordenar por magnitud
-                    coef_df_sorted = coef_df.iloc[1:].sort_values('Magnitud', ascending=False)
-                    coef_df_final = pd.concat([coef_df.iloc[[0]], coef_df_sorted])
-                    
-                    st.dataframe(coef_df_final.style.format({
-                        'Coeficiente': '{:.6f}',
-                        'Magnitud': '{:.6f}'
-                    }).background_gradient(subset=['Magnitud'], cmap='YlOrRd'), 
-                    use_container_width=True)
-                    
-                    # Variable más influyente
-                    if len(coeficientes) > 0:
-                        idx_max = np.argmax([abs(c) for c in coeficientes])
-                        var_max = x_col[idx_max]
-                        coef_max = coeficientes[idx_max]
-                        st.success(f"**Variable más influyente:** {var_max} (coef: {coef_max:.6f})")
+                # Detalles de coeficientes
+                st.markdown("---")
+                st.markdown("**Coeficientes Detallados:**")
+                
+                coef_df = pd.DataFrame({
+                    'Variable': ['Intercepto (β₀)'] + [f'x_{i+1} ({var})' for i, var in enumerate(x_col)],
+                    'Coeficiente': [intercepto] + list(coeficientes),
+                    'Magnitud': [abs(intercepto)] + [abs(c) for c in coeficientes],
+                    'Efecto': ['Constante'] + ['Positivo ↑' if c > 0 else 'Negativo ↓' for c in coeficientes]
+                })
+                
+                # Ordenar por magnitud
+                coef_df_sorted = coef_df.iloc[1:].sort_values('Magnitud', ascending=False)
+                coef_df_final = pd.concat([coef_df.iloc[[0]], coef_df_sorted])
+                
+                st.dataframe(coef_df_final.style.format({
+                    'Coeficiente': '{:.6f}',
+                    'Magnitud': '{:.6f}'
+                }).background_gradient(subset=['Magnitud'], cmap='YlOrRd'), 
+                use_container_width=True)
+                
+                # Variable más influyente
+                if len(coeficientes) > 0:
+                    idx_max = np.argmax([abs(c) for c in coeficientes])
+                    var_max = x_col[idx_max]
+                    coef_max = coeficientes[idx_max]
+                    st.success(f"**Variable más influyente:** {var_max} (coef: {coef_max:.6f})")
             
             # ========== COLUMNA 2: LÍNEA DE REFERENCIA y=x ==========
             with col_ecuacion2:
